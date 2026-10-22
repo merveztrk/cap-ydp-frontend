@@ -44,6 +44,9 @@ const DONEMLER = [
 ];
 
 export default function AcademicPortal() {
+  // Canlıda Vercel ortam değişkeni (Render backend URL), lokalde localhost kullanılır
+  const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5021";
+
   // Aktif Rol Yönetimi: KOORDINATOR, OGRENCI, BOLUM_BASKANI
   const [role, setRole] = useState<"KOORDINATOR" | "OGRENCI" | "BOLUM_BASKANI">("BOLUM_BASKANI");
   
@@ -73,10 +76,10 @@ export default function AcademicPortal() {
   const fetchData = async () => {
     try {
       setLoading(true);
-      const resStudent = await fetch("http://localhost:5021/api/capydp/student");
+      const resStudent = await fetch(`${API_BASE}/api/capydp/student`);
       if (resStudent.ok) setStudent(await resStudent.json());
 
-      const resLogs = await fetch("http://localhost:5021/api/capydp/audit-logs");
+      const resLogs = await fetch(`${API_BASE}/api/capydp/audit-logs`);
       if (resLogs.ok) setAuditLogs(await resLogs.json());
     } catch {
       console.log("Backend offline modda.");
@@ -91,7 +94,7 @@ export default function AcademicPortal() {
 
   const handleApprove = async () => {
     try {
-      const res = await fetch("http://localhost:5021/api/capydp/student/approve", { method: "POST" });
+      const res = await fetch(`${API_BASE}/api/capydp/student/approve`, { method: "POST" });
       if (res.ok) fetchData();
     } catch {
       alert("Onay işlemi başarısız.");
@@ -102,7 +105,7 @@ export default function AcademicPortal() {
     e.preventDefault();
     if (!cCode || !cName) return;
     try {
-      const res = await fetch("http://localhost:5021/api/capydp/student/courses", {
+      const res = await fetch(`${API_BASE}/api/capydp/student/courses`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -128,7 +131,7 @@ export default function AcademicPortal() {
   const handleDeleteCourse = async (id: number) => {
     if (!confirm("Bu dersi protokolden kaldırmak istediğinize emin misiniz?")) return;
     try {
-      const res = await fetch(`http://localhost:5021/api/capydp/student/courses/${id}`, { method: "DELETE" });
+      const res = await fetch(`${API_BASE}/api/capydp/student/courses/${id}`, { method: "DELETE" });
       if (res.ok) fetchData();
     } catch {
       alert("Silinemedi.");
@@ -223,12 +226,9 @@ export default function AcademicPortal() {
 
       {/* ANA İÇERİK ALANI */}
       <main className="max-w-7xl mx-auto px-6 py-6 w-full flex-1">
-        {/* ============================================================== */}
-        {/* BÖLÜM BAŞKANLIĞI PANELİ (Tasarım Görselindeki Ekran)            */}
-        {/* ============================================================== */}
+        {/* BÖLÜM BAŞKANLIĞI PANELİ */}
         {role === "BOLUM_BASKANI" && (
           <div className="space-y-6">
-            {/* Üst Karşılama Kartı */}
             <div className="bg-white p-6 rounded-2xl border border-slate-200/80 shadow-sm flex flex-wrap justify-between items-center gap-4">
               <div>
                 <span className="text-xs px-2.5 py-0.5 bg-blue-50 text-blue-700 font-semibold rounded-full">Bölüm Başkanlığı Yetkili Modu</span>
@@ -272,7 +272,7 @@ export default function AcademicPortal() {
               </div>
             </div>
 
-            {/* İşlem ve Denetim Modülleri (6'lı Kart Grubu) */}
+            {/* İşlem ve Denetim Modülleri */}
             <div>
               <h3 className="text-xs font-bold text-slate-700 uppercase tracking-wider mb-3">İşlem ve Denetim Yetki Modülleri</h3>
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
@@ -320,7 +320,7 @@ export default function AcademicPortal() {
               </div>
             </div>
 
-            {/* SİLİNMEZ SİSTEM DENETİM KÜTÜĞÜ (AUDIT LOG CANLI AKIŞI) */}
+            {/* SİSTEM DENETİM KÜTÜĞÜ (AUDIT LOG CANLI AKIŞI) */}
             <div className="bg-white rounded-2xl border border-slate-200/80 shadow-sm overflow-hidden">
               <div className="p-4 border-b border-slate-100 flex justify-between items-center bg-slate-50/50">
                 <div>
@@ -377,9 +377,7 @@ export default function AcademicPortal() {
           </div>
         )}
 
-        {/* ============================================================== */}
-        {/* KOORDİNATÖR PANELİ                                             */}
-        {/* ============================================================== */}
+        {/* KOORDİNATÖR PANELİ */}
         {role === "KOORDINATOR" && student && (
           <div className="space-y-6">
             <div className="bg-white p-6 rounded-2xl border border-slate-200/80 shadow-sm flex flex-wrap justify-between items-center gap-4">
@@ -481,9 +479,7 @@ export default function AcademicPortal() {
           </div>
         )}
 
-        {/* ============================================================== */}
-        {/* ÖĞRENCİ PANELİ                                                 */}
-        {/* ============================================================== */}
+        {/* ÖĞRENCİ PANELİ */}
         {role === "OGRENCI" && (
           <div className="space-y-6">
             <div className="bg-white p-6 rounded-2xl border border-slate-200/80 shadow-sm flex flex-wrap justify-between items-center gap-4">
@@ -513,7 +509,7 @@ export default function AcademicPortal() {
                 <tbody className="divide-y divide-slate-100">
                   {filtrelenmisDersler.map((item) => (
                     <tr key={item.id} className="hover:bg-slate-50/50">
-                      <td className="p-3 font-medium text-slate-800">{item.courseCode} - {item.courseName}</td>
+                      <td className="p-3 font-medium text-slate-800">{item.courseCode} {item.courseName}</td>
                       <td className="p-3">{item.akts}</td>
                       <td className="p-3 font-bold">{item.grade || "Devam"}</td>
                       <td className="p-3">
@@ -535,9 +531,9 @@ export default function AcademicPortal() {
         <div className="max-w-7xl mx-auto px-6 flex flex-wrap justify-between items-center text-[11px] text-slate-400 gap-2">
           <p>© 2026 Üniversite Bilgi Yönetim Sistemi (ABYS) • Bölüm Başkanlığı, ÇAP/YDP Koordinatörlük ve Denetim Modülü</p>
           <div className="flex gap-4">
-            <span className="hover:text-slate-600 cursor-pointer">Sürüm v3.4.1 (Kurumsal)[cite: 18]</span>
-            <span className="hover:text-slate-600 cursor-pointer">Mevzuat Kılavuzu[cite: 18]</span>
-            <span className="hover:text-slate-600 cursor-pointer">BT Destek[cite: 18]</span>
+            <span className="hover:text-slate-600 cursor-pointer">Sürüm v3.4.1 (Kurumsal)</span>
+            <span className="hover:text-slate-600 cursor-pointer">Mevzuat Kılavuzu</span>
+            <span className="hover:text-slate-600 cursor-pointer">BT Destek</span>
           </div>
         </div>
       </footer>
