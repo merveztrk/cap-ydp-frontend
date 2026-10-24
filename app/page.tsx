@@ -1,542 +1,750 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
+import { FormEvent, useCallback, useEffect, useState } from "react";
 
-interface ProtocolCourse {
+type Role = "KOORDINATOR" | "OGRENCI" | "BOLUM_BASKANI";
+
+interface SessionUser {
   id: number;
-  courseCode: string;
-  courseName: string;
-  akts: number;
-  status: string;
-  exemptionReason?: string;
-  grade?: string;
-  semesterTaken?: string;
+  email: string;
+  roles: Role[];
 }
 
-interface StudentProfile {
+interface Student {
   id: number;
   studentNumber: string;
   fullName: string;
-  majorDepartment: string;
-  doubleMajorDepartment: string;
-  currentMajorGano: number;
-  currentSemester: number;
-  isCapApproved: boolean;
-  isLocked: boolean;
-  coordinatorPrivateNote?: string;
-  courses: ProtocolCourse[];
+  email: string;
+  program: string;
+  admissionTerm: string;
+  status: string;
 }
 
-interface AuditLogItem {
+interface CatalogCourse {
   id: number;
-  performedBy: string;
-  action: string;
-  details: string;
-  timestamp: string;
-  ipAddress: string;
+  code: string;
+  name: string;
+  ects: number;
+  credits: number | null;
+  active: boolean;
 }
 
-const DONEMLER = [
-  "2024-2025 Güz",
-  "2024-2025 Bahar",
-  "2025-2026 Güz",
-  "2025-2026 Bahar"
-];
+interface CourseRecord {
+  id: number;
+  courseId: number;
+  code: string;
+  name: string;
+  ects: number;
+  academicYear: string;
+  term: string;
+  status: string;
+  reviewStatus: string;
+  grade: string | null;
+  attempt: number;
+  reason: string | null;
+  isHistoricalEntry: boolean;
+}
+
+interface AuditEntry {
+  id: number;
+  userId: number | null;
+  action: string;
+  recordType: string;
+  recordId: string;
+  reason: string | null;
+  timestamp: string;
+}
+
+interface Message {
+  id: number;
+  senderUserId: number;
+  content: string;
+  sentAt: string;
+  isFromCurrentUser: boolean;
+  readByStudent: boolean;
+  readByCoordinator: boolean;
+}
+
+const API_BASE = "";
+
+async function readMessage(response: Response): Promise<string> {
+  const text = await response.text();
+  if (!text) return response.ok ? "" : `İstek başarısız (HTTP ${response.status}).`;
+  try {
+    const body: unknown = JSON.parse(text);
+    if (body && typeof body === "object" && "message" in body && typeof body.message === "string") {
+      return body.message;
+    }
+  } catch {
+    return text;
+  }
+  return response.ok ? "" : `İstek başarısız (HTTP ${response.status}).`;
+}
 
 export default function AcademicPortal() {
-  // Canlıda Vercel ortam değişkeni (Render backend URL), lokalde localhost kullanılır
-  const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5021";
+  const [user, setUser] = useState<SessionUser | null>(null);
+  const [student, setStudent] = useState<Student | null>(null);
+  const [students, setStudents] = useState<Student[]>([]);
+  const [catalog, setCatalog] = useState<CatalogCourse[]>([]);
+  const [records, setRecords] = useState<CourseRecord[]>([]);
+  const [audit, setAudit] = useState<AuditEntry[]>([]);
+  const [messages, setMessages] = useState<Message[]>([]);
+  const [ruleResult, setRuleResult] = useState<Array<{ metric: string; actual: number | null; operator: string; threshold: number; passed: boolean; warning: string | null; unavailable: string | null }>>([]);
+  const [selectedStudentId, setSelectedStudentId] = useState<number | null>(null);
+  const [busy, setBusy] = useState(true);
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
+  const [showSetup, setShowSetup] = useState(false);
+  const [loginEmail, setLoginEmail] = useState("");
+  const [loginPassword, setLoginPassword] = useState("");
+  const [setupKey, setSetupKey] = useState("");
+  const [studentForm, setStudentForm] = useState({
+    studentNumber: "", firstName: "", lastName: "", email: "", majorDepartment: "",
+    program: "CAP", admissionTerm: "", temporaryPassword: ""
+  });
+  const [chairForm, setChairForm] = useState({ email: "", temporaryPassword: "" });
+  const [courseForm, setCourseForm] = useState({
+    courseId: "", academicYear: "", term: "Güz", status: "Planlandı", grade: "",
+    attempt: "1", reason: "", historicalEntry: false
+  });
+  const [messageText, setMessageText] = useState("");
+  const [advisingForm, setAdvisingForm] = useState({ majorGpa: "", gpaSource: "", privateNote: "", reason: "" });
+  const [decisionForm, setDecisionForm] = useState({ decision: "Mezun", reason: "" });
+  const [catalogForm, setCatalogForm] = useState({ code: "", name: "", ects: "5", credits: "", curriculumYear: "" });
+  const [ruleForm, setRuleForm] = useState({ program: "CAP", metric: "AnadalGano", operator: "Minimum", threshold: "", warning: "", authority: "", effectiveAt: "" });
 
-  // Aktif Rol Yönetimi: KOORDINATOR, OGRENCI, BOLUM_BASKANI
-  const [role, setRole] = useState<"KOORDINATOR" | "OGRENCI" | "BOLUM_BASKANI">("BOLUM_BASKANI");
-  
-  // Alt Sekmeler
-  const [koordTab, setKoordTab] = useState<"PANEL" | "OGRENCI_EKLE" | "EVRAK_ONAY" | "INTIBAK" | "YONERGE">("INTIBAK");
-  const [ogrenciTab, setOgrenciTab] = useState<"DERS_NOT" | "EVRAK_YUKLE" | "MESAJLAR">("DERS_NOT");
-  const [baskanTab, setBaskanTab] = useState<"GENEL_BAKIS" | "DENETIM_KUTUGU" | "OGRENCI_LISTESI">("GENEL_BAKIS");
-
-  // Dönem ve Filtreleme
-  const [seciliDonem, setSeciliDonem] = useState<string>("2025-2026 Bahar");
-  const [tumDonemleriGoster, setTumDonemleriGoster] = useState<boolean>(false);
-
-  // Canlı Veriler
-  const [student, setStudent] = useState<StudentProfile | null>(null);
-  const [auditLogs, setAuditLogs] = useState<AuditLogItem[]>([]);
-  const [loading, setLoading] = useState<boolean>(true);
-
-  // Form State'leri
-  const [cCode, setCCode] = useState("");
-  const [cName, setCName] = useState("");
-  const [cAkts, setCAkts] = useState(5);
-  const [cStatus, setCStatus] = useState<"Alinacak" | "Muaf">("Alinacak");
-  const [cReason, setCReason] = useState("");
-  const [cSemester, setCSemester] = useState("2025-2026 Bahar");
-
-  // Veri Çekme
-  const fetchData = async () => {
-    try {
-      setLoading(true);
-      const resStudent = await fetch(`${API_BASE}/api/capydp/student`);
-      if (resStudent.ok) setStudent(await resStudent.json());
-
-      const resLogs = await fetch(`${API_BASE}/api/capydp/audit-logs`);
-      if (resLogs.ok) setAuditLogs(await resLogs.json());
-    } catch {
-      console.log("Backend offline modda.");
-    } finally {
-      setLoading(false);
+  const request = useCallback(async (path: string, init: RequestInit = {}) => {
+    const headers = new Headers(init.headers);
+    if (init.body && !headers.has("Content-Type")) headers.set("Content-Type", "application/json");
+    if (init.method && init.method !== "GET") {
+      const csrfResponse = await fetch(`${API_BASE}/api/auth/csrf`, { credentials: "include" });
+      if (!csrfResponse.ok) throw new Error(await readMessage(csrfResponse));
+      const csrfBody = await csrfResponse.json() as { token: string };
+      headers.set("X-CSRF-TOKEN", csrfBody.token);
     }
-  };
-
-  useEffect(() => {
-    fetchData();
+    const response = await fetch(`${API_BASE}${path}`, {
+      ...init,
+      headers,
+      credentials: "include"
+    });
+    if (!response.ok) throw new Error(await readMessage(response));
+    return response;
   }, []);
 
-  const handleApprove = async () => {
+  const refreshRecords = useCallback(async (studentId: number) => {
+    const response = await request(`/api/academic/students/${studentId}/courses`);
+    const body = await response.json() as { records: CourseRecord[] };
+    setRecords(body.records);
+  }, [request]);
+
+  const refreshMessages = useCallback(async (studentId: number) => {
+    const response = await request(`/api/academic/students/${studentId}/messages`);
+    setMessages(await response.json() as Message[]);
+  }, [request]);
+
+  const loadDashboard = useCallback(async (activeUser: SessionUser) => {
+    setError("");
+    const catalogResponse = await request("/api/academic/catalog");
+    setCatalog(await catalogResponse.json() as CatalogCourse[]);
+
+    if (activeUser.roles.includes("OGRENCI")) {
+      const response = await request("/api/academic/me/student");
+      const profile = await response.json() as Student;
+      setStudent(profile);
+      setSelectedStudentId(profile.id);
+      await refreshRecords(profile.id);
+      return;
+    }
+
+    const studentResponse = await request("/api/academic/students");
+    const studentList = await studentResponse.json() as Student[];
+    setStudents(studentList);
+    const selectedId = studentList[0]?.id ?? null;
+    setSelectedStudentId(selectedId);
+    if (selectedId !== null) await refreshRecords(selectedId);
+    if (activeUser.roles.includes("BOLUM_BASKANI")) {
+      const auditResponse = await request("/api/academic/audit");
+      setAudit(await auditResponse.json() as AuditEntry[]);
+    }
+  }, [refreshRecords, request]);
+
+  useEffect(() => {
+    if (selectedStudentId === null || !user || user.roles.includes("BOLUM_BASKANI")) return;
+    // The request synchronizes the selected student's inbox with the server.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    void refreshMessages(selectedStudentId).catch(loadError => {
+      setError(loadError instanceof Error ? loadError.message : "Mesajlar yüklenemedi.");
+    });
+  }, [refreshMessages, selectedStudentId, user]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const restoreSession = async () => {
+      try {
+        const response = await fetch(`${API_BASE}/api/auth/me`, { credentials: "include" });
+        if (!response.ok) return;
+        const activeUser = await response.json() as SessionUser;
+        if (cancelled) return;
+        setUser(activeUser);
+        await loadDashboard(activeUser);
+      } catch (loadError) {
+        if (!cancelled) setError(loadError instanceof Error ? loadError.message : "Veriler yüklenemedi.");
+      } finally {
+        if (!cancelled) setBusy(false);
+      }
+    };
+    void restoreSession();
+    return () => { cancelled = true; };
+  }, [loadDashboard]);
+
+  const signIn = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setSubmitting(true);
+    setError("");
     try {
-      const res = await fetch(`${API_BASE}/api/capydp/student/approve`, { method: "POST" });
-      if (res.ok) fetchData();
-    } catch {
-      alert("Onay işlemi başarısız.");
+      const response = await request("/api/auth/login", {
+        method: "POST",
+        body: JSON.stringify({ email: loginEmail, password: loginPassword })
+      });
+      const activeUser = await response.json() as SessionUser;
+      setUser(activeUser);
+      setLoginPassword("");
+      await loadDashboard(activeUser);
+    } catch (loginError) {
+      setError(loginError instanceof Error ? loginError.message : "Giriş yapılamadı.");
+    } finally {
+      setSubmitting(false);
     }
   };
 
-  const handleAddCourse = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!cCode || !cName) return;
+  const setupCoordinator = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setSubmitting(true);
+    setError("");
     try {
-      const res = await fetch(`${API_BASE}/api/capydp/student/courses`, {
+      const response = await request("/api/auth/setup", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "X-Setup-Key": setupKey },
+        body: JSON.stringify({ email: loginEmail, password: loginPassword })
+      });
+      setNotice(await readMessage(response) || "İlk koordinatör hesabı oluşturuldu. Şimdi giriş yapabilirsiniz.");
+      setShowSetup(false);
+      setLoginPassword("");
+      setSetupKey("");
+    } catch (setupError) {
+      setError(setupError instanceof Error ? setupError.message : "Kurulum yapılamadı.");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const signOut = async () => {
+    try {
+      await request("/api/auth/logout", { method: "POST" });
+      setUser(null);
+      setStudent(null);
+      setStudents([]);
+      setRecords([]);
+      setAudit([]);
+    } catch (logoutError) {
+      setError(logoutError instanceof Error ? logoutError.message : "Oturum kapatılamadı.");
+    }
+  };
+
+  const createStudent = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setSubmitting(true);
+    setError("");
+    setNotice("");
+    try {
+      await request("/api/academic/students", { method: "POST", body: JSON.stringify(studentForm) });
+      setStudentForm({
+        studentNumber: "", firstName: "", lastName: "", email: "", majorDepartment: "",
+        program: "CAP", admissionTerm: "", temporaryPassword: ""
+      });
+      setNotice("Öğrenci kaydı ve hesabı oluşturuldu.");
+      if (user) await loadDashboard(user);
+    } catch (createError) {
+      setError(createError instanceof Error ? createError.message : "Öğrenci eklenemedi.");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const createChairAccount = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setSubmitting(true);
+    setError("");
+    try {
+      await request("/api/academic/accounts", {
+        method: "POST",
+        body: JSON.stringify({ ...chairForm, role: "BOLUM_BASKANI" })
+      });
+      setChairForm({ email: "", temporaryPassword: "" });
+      setNotice("Salt okunur bölüm başkanı hesabı oluşturuldu.");
+    } catch (accountError) {
+      setError(accountError instanceof Error ? accountError.message : "Hesap oluşturulamadı.");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const addCourseRecord = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (selectedStudentId === null) return;
+    setSubmitting(true);
+    setError("");
+    setNotice("");
+    try {
+      await request(`/api/academic/students/${selectedStudentId}/courses`, {
+        method: "POST",
         body: JSON.stringify({
-          courseCode: cCode,
-          courseName: cName,
-          akts: Number(cAkts),
-          status: cStatus,
-          exemptionReason: cStatus === "Muaf" ? cReason : null,
-          semesterTaken: cSemester
+          ...courseForm,
+          courseId: Number(courseForm.courseId),
+          attempt: Number(courseForm.attempt),
+          grade: courseForm.grade || null,
+          reason: courseForm.reason || null,
+          recordType: courseForm.status === "Planlandı" ? "Plan" : "Dönem Kaydı"
         })
       });
-      if (res.ok) {
-        setCCode("");
-        setCName("");
-        setCReason("");
-        fetchData();
-      }
-    } catch {
-      alert("Ders eklenemedi.");
+      setNotice(user?.roles.includes("KOORDINATOR") || courseForm.historicalEntry
+        ? "Ders kaydı eklendi."
+        : "Ders kaydı koordinatör onayına gönderildi.");
+      await refreshRecords(selectedStudentId);
+    } catch (recordError) {
+      setError(recordError instanceof Error ? recordError.message : "Ders kaydı eklenemedi.");
+    } finally {
+      setSubmitting(false);
     }
   };
 
-  const handleDeleteCourse = async (id: number) => {
-    if (!confirm("Bu dersi protokolden kaldırmak istediğinize emin misiniz?")) return;
+  const reviewRecord = async (recordId: number, status: string) => {
+    const reason = status === "Onaylandı" ? null : window.prompt(`${status} gerekçesi`);
+    if (status !== "Onaylandı" && !reason?.trim()) return;
+    setSubmitting(true);
+    setError("");
     try {
-      const res = await fetch(`${API_BASE}/api/capydp/student/courses/${id}`, { method: "DELETE" });
-      if (res.ok) fetchData();
-    } catch {
-      alert("Silinemedi.");
+      await request(`/api/academic/courses/${recordId}/review`, {
+        method: "POST",
+        body: JSON.stringify({ status, reason })
+      });
+      if (selectedStudentId !== null) await refreshRecords(selectedStudentId);
+      setNotice(`Kayıt ${status.toLocaleLowerCase("tr-TR")}.`);
+    } catch (reviewError) {
+      setError(reviewError instanceof Error ? reviewError.message : "Kayıt incelenemedi.");
+    } finally {
+      setSubmitting(false);
     }
   };
 
-  const filtrelenmisDersler = student?.courses.filter(c => tumDonemleriGoster ? true : c.semesterTaken === seciliDonem) || [];
-  const donemlikToplamAkts = filtrelenmisDersler.reduce((acc, c) => acc + c.akts, 0);
+  const sendMessage = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (selectedStudentId === null) return;
+    setSubmitting(true);
+    setError("");
+    try {
+      await request(`/api/academic/students/${selectedStudentId}/messages`, {
+        method: "POST", body: JSON.stringify({ content: messageText })
+      });
+      setMessageText("");
+      await refreshMessages(selectedStudentId);
+    } catch (sendError) {
+      setError(sendError instanceof Error ? sendError.message : "Mesaj gönderilemedi.");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const markMessageRead = async (messageId: number) => {
+    try {
+      await request(`/api/academic/messages/${messageId}/read`, { method: "POST" });
+      if (selectedStudentId !== null) await refreshMessages(selectedStudentId);
+    } catch (readError) {
+      setError(readError instanceof Error ? readError.message : "Mesaj okundu olarak işaretlenemedi.");
+    }
+  };
+
+  const saveAdvisingData = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (selectedStudentId === null) return;
+    setSubmitting(true);
+    setError("");
+    try {
+      await request(`/api/academic/students/${selectedStudentId}/advising-data`, {
+        method: "PUT",
+        body: JSON.stringify({
+          majorGpa: advisingForm.majorGpa ? Number(advisingForm.majorGpa) : null,
+          gpaSource: advisingForm.gpaSource || null,
+          privateNote: advisingForm.privateNote || null,
+          reason: advisingForm.reason || null
+        })
+      });
+      setNotice("Koordinatör notu ve GANO bilgisi kaydedildi.");
+      setAdvisingForm({ majorGpa: "", gpaSource: "", privateNote: "", reason: "" });
+    } catch (saveError) {
+      setError(saveError instanceof Error ? saveError.message : "Öğrenci bilgisi kaydedilemedi.");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const saveDecision = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (selectedStudentId === null) return;
+    setSubmitting(true);
+    setError("");
+    try {
+      await request(`/api/academic/students/${selectedStudentId}/decision`, {
+        method: "POST", body: JSON.stringify(decisionForm)
+      });
+      setNotice("Öğrenci kararı gerekçesiyle kaydedildi.");
+      setDecisionForm({ ...decisionForm, reason: "" });
+      if (user) await loadDashboard(user);
+    } catch (decisionError) {
+      setError(decisionError instanceof Error ? decisionError.message : "Karar kaydedilemedi.");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const addCatalogCourse = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setSubmitting(true);
+    setError("");
+    try {
+      await request("/api/academic/catalog", {
+        method: "POST",
+        body: JSON.stringify({
+          code: catalogForm.code,
+          name: catalogForm.name,
+          ects: Number(catalogForm.ects),
+          credits: catalogForm.credits ? Number(catalogForm.credits) : null,
+          curriculumYear: catalogForm.curriculumYear ? Number(catalogForm.curriculumYear) : null
+        })
+      });
+      setCatalogForm({ code: "", name: "", ects: "5", credits: "", curriculumYear: "" });
+      const response = await request("/api/academic/catalog");
+      setCatalog(await response.json() as CatalogCourse[]);
+      setNotice("Ders kataloğa eklendi.");
+    } catch (catalogError) {
+      setError(catalogError instanceof Error ? catalogError.message : "Ders eklenemedi.");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const addRuleVersion = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setSubmitting(true);
+    setError("");
+    try {
+      await request("/api/academic/rules", {
+        method: "POST",
+        body: JSON.stringify({
+          program: ruleForm.program,
+          authority: ruleForm.authority,
+          effectiveAt: new Date(ruleForm.effectiveAt).toISOString(),
+          rules: [{
+            metric: ruleForm.metric,
+            operator: ruleForm.operator,
+            threshold: Number(ruleForm.threshold),
+            warning: ruleForm.warning
+          }]
+        })
+      });
+      setNotice("Yönerge sürümü kaydedildi. Eski sürümler ve kontroller korunur.");
+      setRuleForm({ ...ruleForm, authority: "", effectiveAt: "", threshold: "", warning: "" });
+    } catch (ruleError) {
+      setError(ruleError instanceof Error ? ruleError.message : "Yönerge sürümü kaydedilemedi.");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const evaluateRules = async () => {
+    if (selectedStudentId === null) return;
+    setSubmitting(true);
+    setError("");
+    try {
+      const response = await request(`/api/academic/students/${selectedStudentId}/rules/evaluate`, { method: "POST" });
+      const result = await response.json() as { rules: typeof ruleResult };
+      setRuleResult(result.rules);
+    } catch (ruleError) {
+      setError(ruleError instanceof Error ? ruleError.message : "Kural denetimi yapılamadı.");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const isCoordinator = user?.roles.includes("KOORDINATOR") ?? false;
+  const isStudent = user?.roles.includes("OGRENCI") ?? false;
+  const isChair = user?.roles.includes("BOLUM_BASKANI") ?? false;
+
+  if (busy) {
+    return <main className="mx-auto max-w-5xl p-8 text-slate-600" role="status">Oturum kontrol ediliyor…</main>;
+  }
+
+  if (!user) {
+    return (
+      <main className="flex min-h-screen items-center justify-center bg-slate-100 px-4 py-10">
+        <section className="w-full max-w-md rounded-2xl border border-slate-200 bg-white p-8 shadow-sm">
+          <div className="mb-7">
+            <p className="text-sm font-semibold text-blue-700">ÇAP · YDP</p>
+            <h1 className="mt-1 text-2xl font-bold text-slate-900">Akademik takip sistemi</h1>
+            <p className="mt-2 text-sm text-slate-600">Hesabınızla giriş yapın. Öğrenci kaydı yalnızca koordinatör tarafından açılır.</p>
+          </div>
+          {error && <p className="mb-4 rounded-lg bg-red-50 p-3 text-sm text-red-800" role="alert">{error}</p>}
+          {notice && <p className="mb-4 rounded-lg bg-emerald-50 p-3 text-sm text-emerald-800" role="status">{notice}</p>}
+          <form className="space-y-4" onSubmit={showSetup ? setupCoordinator : signIn}>
+            <label className="block text-sm font-medium text-slate-700">
+              E-posta
+              <input autoComplete="username" required type="email" value={loginEmail} onChange={event => setLoginEmail(event.target.value)} className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2" />
+            </label>
+            <label className="block text-sm font-medium text-slate-700">
+              {showSetup ? "İlk koordinatör parolası" : "Parola"}
+              <input autoComplete={showSetup ? "new-password" : "current-password"} required type="password" value={loginPassword} onChange={event => setLoginPassword(event.target.value)} className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2" />
+            </label>
+            {showSetup && (
+              <label className="block text-sm font-medium text-slate-700">
+                Kurulum anahtarı
+                <input required type="password" value={setupKey} onChange={event => setSetupKey(event.target.value)} className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2" />
+              </label>
+            )}
+            <button disabled={submitting} className="w-full rounded-lg bg-blue-700 px-4 py-2.5 font-semibold text-white disabled:opacity-60">
+              {submitting ? "İşleniyor…" : showSetup ? "Koordinatör hesabını oluştur" : "Giriş yap"}
+            </button>
+          </form>
+          <button type="button" onClick={() => { setShowSetup(!showSetup); setError(""); }} className="mt-5 text-sm text-blue-700 underline">
+            {showSetup ? "Giriş ekranına dön" : "İlk koordinatör kurulumu"}
+          </button>
+          <p className="mt-5 text-xs text-slate-500">Kurulum için backend üzerinde en az 32 karakterli COORDINATOR_SETUP_KEY tanımlanmalıdır.</p>
+        </section>
+      </main>
+    );
+  }
+
+  const selectedStudent = isStudent ? student : students.find(item => item.id === selectedStudentId) ?? null;
+  const pendingRecords = records.filter(record => record.reviewStatus === "Bekliyor");
+  const completedEcts = Array.from(new Map(
+    records
+      .filter(record => record.reviewStatus === "Onaylandı" && (record.status === "Geçti" || record.status === "Muaf"))
+      .map(record => [record.courseId, record.ects])
+  ).values()).reduce((sum, ects) => sum + ects, 0);
 
   return (
-    <div className="min-h-screen bg-[#F8FAFC] text-slate-800 font-sans flex flex-col justify-between">
-      {/* ÜST GLOBAL HEADER */}
-      <header className="bg-white border-b border-slate-200 sticky top-0 z-30">
-        <div className="max-w-7xl mx-auto px-6 h-16 flex justify-between items-center">
-          <div className="flex items-center gap-6">
-            <div className="flex items-center gap-2.5">
-              <div className="w-9 h-9 bg-blue-600 text-white rounded-lg flex items-center justify-center font-bold text-base shadow-sm">🏛️</div>
-              <div>
-                <h1 className="text-sm font-bold text-slate-900 leading-tight">Akademik Portal</h1>
-                <p className="text-[11px] text-slate-400">ÇAP & YDP Yönetim ve Karar Destek Sistemi</p>
-              </div>
-            </div>
-
-            {/* Rol Seçici Geçiş */}
-            <div className="flex bg-slate-100 p-0.5 rounded-lg border border-slate-200 text-xs font-semibold">
-              <button
-                onClick={() => setRole("BOLUM_BASKANI")}
-                className={`px-3 py-1 rounded-md transition ${role === "BOLUM_BASKANI" ? "bg-white text-blue-700 shadow-sm" : "text-slate-500 hover:text-slate-800"}`}
-              >
-                Bölüm Başkanlığı
-              </button>
-              <button
-                onClick={() => setRole("KOORDINATOR")}
-                className={`px-3 py-1 rounded-md transition ${role === "KOORDINATOR" ? "bg-white text-blue-700 shadow-sm" : "text-slate-500 hover:text-slate-800"}`}
-              >
-                Koordinatör
-              </button>
-              <button
-                onClick={() => setRole("OGRENCI")}
-                className={`px-3 py-1 rounded-md transition ${role === "OGRENCI" ? "bg-white text-blue-700 shadow-sm" : "text-slate-500 hover:text-slate-800"}`}
-              >
-                Öğrenci
-              </button>
-            </div>
+    <main className="min-h-screen bg-slate-50">
+      <header className="border-b border-slate-200 bg-white">
+        <div className="mx-auto flex max-w-7xl flex-wrap items-center justify-between gap-3 px-5 py-4">
+          <div>
+            <h1 className="font-bold text-slate-900">ÇAP · YDP Akademik Takip</h1>
+            <p className="text-sm text-slate-500">{user.email} · {isCoordinator ? "Koordinatör" : isChair ? "Bölüm başkanı (salt okunur)" : "Öğrenci"}</p>
           </div>
-
-          <div className="flex items-center gap-4 text-xs">
-            <div className="text-right hidden sm:block">
-              <p className="font-bold text-slate-800">
-                {role === "BOLUM_BASKANI" ? "Prof. Dr. Kemal Vural" : role === "KOORDINATOR" ? "Prof. Dr. Ayşe Yılmaz" : "Merve Öztürk"}
-              </p>
-              <p className="text-[11px] text-slate-400">
-                {role === "BOLUM_BASKANI" ? "Bilgisayar Mühendisliği Bölüm Başkanı" : role === "KOORDINATOR" ? "ÇAP/YDP Koordinatörü" : "Öğrenci No: 2133011045"}
-              </p>
-            </div>
-            <div className="w-8 h-8 rounded-full bg-slate-100 border border-slate-200 flex items-center justify-center font-bold text-slate-600">
-              {role === "BOLUM_BASKANI" ? "KV" : role === "KOORDINATOR" ? "AY" : "MÖ"}
-            </div>
-          </div>
-        </div>
-
-        {/* MODÜL ALT NAVİGASYONU */}
-        <div className="max-w-7xl mx-auto px-6 flex gap-6 text-xs font-medium text-slate-600 border-t border-slate-100 overflow-x-auto">
-          {role === "BOLUM_BASKANI" && (
-            <>
-              <button onClick={() => setBaskanTab("GENEL_BAKIS")} className={`py-3 border-b-2 transition ${baskanTab === "GENEL_BAKIS" ? "border-blue-600 text-blue-600 font-semibold" : "border-transparent hover:text-slate-900"}`}>Genel İzleme & Modüller</button>
-              <button onClick={() => setBaskanTab("DENETIM_KUTUGU")} className={`py-3 border-b-2 transition flex items-center gap-1.5 ${baskanTab === "DENETIM_KUTUGU" ? "border-blue-600 text-blue-600 font-semibold" : "border-transparent hover:text-slate-900"}`}>
-                Audit Log Canlı Akışı <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
-              </button>
-              <button onClick={() => setBaskanTab("OGRENCI_LISTESI")} className={`py-3 border-b-2 transition ${baskanTab === "OGRENCI_LISTESI" ? "border-blue-600 text-blue-600 font-semibold" : "border-transparent hover:text-slate-900"}`}>Bölüm Öğrencileri & Gürbüz Durumları</button>
-            </>
-          )}
-
-          {role === "KOORDINATOR" && (
-            <>
-              <button onClick={() => setKoordTab("INTIBAK")} className={`py-3 border-b-2 transition ${koordTab === "INTIBAK" ? "border-blue-600 text-blue-600 font-semibold" : "border-transparent hover:text-slate-900"}`}>Ders & Müfredat Eşleştirme</button>
-              <button onClick={() => setKoordTab("OGRENCI_EKLE")} className={`py-3 border-b-2 transition ${koordTab === "OGRENCI_EKLE" ? "border-blue-600 text-blue-600 font-semibold" : "border-transparent hover:text-slate-900"}`}>Öğrenci Ekleme</button>
-              <button onClick={() => setKoordTab("EVRAK_ONAY")} className={`py-3 border-b-2 transition ${koordTab === "EVRAK_ONAY" ? "border-blue-600 text-blue-600 font-semibold" : "border-transparent hover:text-slate-900"}`}>Onay Bekleyen Evraklar (14)</button>
-              <button onClick={() => setKoordTab("YONERGE")} className={`py-3 border-b-2 transition ${koordTab === "YONERGE" ? "border-blue-600 text-blue-600 font-semibold" : "border-transparent hover:text-slate-900"}`}>Yönerge & Kurallar</button>
-            </>
-          )}
-
-          {role === "OGRENCI" && (
-            <>
-              <button onClick={() => setOgrenciTab("DERS_NOT")} className={`py-3 border-b-2 transition ${ogrenciTab === "DERS_NOT" ? "border-blue-600 text-blue-600 font-semibold" : "border-transparent hover:text-slate-900"}`}>Dönemlik Ders ve Not Durumu</button>
-              <button onClick={() => setOgrenciTab("EVRAK_YUKLE")} className={`py-3 border-b-2 transition ${ogrenciTab === "EVRAK_YUKLE" ? "border-blue-600 text-blue-600 font-semibold" : "border-transparent hover:text-slate-900"}`}>Belge & Transkript Yükleme</button>
-              <button onClick={() => setOgrenciTab("MESAJLAR")} className={`py-3 border-b-2 transition ${ogrenciTab === "MESAJLAR" ? "border-blue-600 text-blue-600 font-semibold" : "border-transparent hover:text-slate-900"}`}>Koordinatör Mesajlaşma</button>
-            </>
-          )}
+          <button onClick={signOut} className="rounded-lg border border-slate-300 px-3 py-2 text-sm">Güvenli çıkış</button>
         </div>
       </header>
 
-      {/* ANA İÇERİK ALANI */}
-      <main className="max-w-7xl mx-auto px-6 py-6 w-full flex-1">
-        {/* BÖLÜM BAŞKANLIĞI PANELİ */}
-        {role === "BOLUM_BASKANI" && (
-          <div className="space-y-6">
-            <div className="bg-white p-6 rounded-2xl border border-slate-200/80 shadow-sm flex flex-wrap justify-between items-center gap-4">
-              <div>
-                <span className="text-xs px-2.5 py-0.5 bg-blue-50 text-blue-700 font-semibold rounded-full">Bölüm Başkanlığı Yetkili Modu</span>
-                <h2 className="text-xl font-bold text-slate-900 mt-2">Bölüm Başkanlığı İzleme ve Denetim Merkezi</h2>
-                <p className="text-xs text-slate-500 mt-1 max-w-2xl">
-                  Prof. Dr. Kemal Vural — Bilgisayar Mühendisliği Bölüm Başkanı. ÇAP ve YDP programlarındaki tüm koordinatör kararlarını, intibak protokollerini ve sistem denetim kayıtlarını buradan denetleyebilirsiniz.
-                </p>
-              </div>
-              <div className="flex gap-2">
-                <button className="px-4 py-2 border border-slate-200 rounded-lg text-xs font-semibold hover:bg-slate-50">Kütüğü İndir</button>
-                <button className="px-4 py-2 bg-blue-600 text-white rounded-lg text-xs font-semibold hover:bg-blue-700 shadow-sm">Dönem Raporu Al (PDF)</button>
-              </div>
-            </div>
+      <div className="mx-auto max-w-7xl space-y-6 px-5 py-6">
+        {error && <p className="rounded-lg bg-red-50 p-3 text-sm text-red-800" role="alert">{error}</p>}
+        {notice && <p className="rounded-lg bg-emerald-50 p-3 text-sm text-emerald-800" role="status">{notice}</p>}
 
-            {/* İstatistik Kartları */}
-            <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
-              <div className="bg-white p-4 rounded-xl border border-slate-200/80 shadow-sm">
-                <span className="text-[11px] text-slate-400 font-medium">Toplam Öğrenci</span>
-                <p className="text-2xl font-bold text-slate-800 mt-1">142</p>
-                <span className="text-[10px] text-slate-500">89 ÇAP / 53 YDP Kayıtlı</span>
-              </div>
-              <div className="bg-white p-4 rounded-xl border border-slate-200/80 shadow-sm">
-                <span className="text-[11px] text-amber-600 font-medium">Bekleyen Onay</span>
-                <p className="text-2xl font-bold text-amber-600 mt-1">14</p>
-                <span className="text-[10px] text-slate-500">Evrak / İntibak Onayı</span>
-              </div>
-              <div className="bg-white p-4 rounded-xl border border-slate-200/80 shadow-sm">
-                <span className="text-[11px] text-blue-600 font-medium">Bu Yıl Yeni Başvuru</span>
-                <p className="text-2xl font-bold text-blue-600 mt-1">28</p>
-                <span className="text-[10px] text-slate-500">21 ÇAP / 7 YDP Başvuru</span>
-              </div>
-              <div className="bg-white p-4 rounded-xl border border-slate-200/80 shadow-sm">
-                <span className="text-[11px] text-red-600 font-medium">Kritik Sınır (İlişik Kesme)</span>
-                <p className="text-2xl font-bold text-red-600 mt-1">3</p>
-                <span className="text-[10px] text-red-500 font-medium">2.50 GANO Altında Riskli</span>
-              </div>
-              <div className="bg-white p-4 rounded-xl border border-slate-200/80 shadow-sm">
-                <span className="text-[11px] text-purple-600 font-medium">Bölüm ÇAP GANO Ort.</span>
-                <p className="text-2xl font-bold text-purple-700 mt-1">3.54 <span className="text-xs font-normal text-slate-400">/ 4.00</span></p>
-                <span className="text-[10px] text-slate-500">Fakülte Ort. Üstünde</span>
-              </div>
-            </div>
+        {isCoordinator && (
+          <section className="rounded-xl border border-slate-200 bg-white p-5">
+            <h2 className="font-semibold">Öğrenci ekle</h2>
+            <form onSubmit={createStudent} className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+              <input required maxLength={20} placeholder="Öğrenci numarası" value={studentForm.studentNumber} onChange={event => setStudentForm({ ...studentForm, studentNumber: event.target.value })} className="rounded-lg border p-2" />
+              <input required maxLength={50} placeholder="Ad" value={studentForm.firstName} onChange={event => setStudentForm({ ...studentForm, firstName: event.target.value })} className="rounded-lg border p-2" />
+              <input required maxLength={50} placeholder="Soyad" value={studentForm.lastName} onChange={event => setStudentForm({ ...studentForm, lastName: event.target.value })} className="rounded-lg border p-2" />
+              <input required type="email" placeholder="Okul e-postası" value={studentForm.email} onChange={event => setStudentForm({ ...studentForm, email: event.target.value })} className="rounded-lg border p-2" />
+              <input required placeholder="Anadal bölümü" value={studentForm.majorDepartment} onChange={event => setStudentForm({ ...studentForm, majorDepartment: event.target.value })} className="rounded-lg border p-2" />
+              <select value={studentForm.program} onChange={event => setStudentForm({ ...studentForm, program: event.target.value })} className="rounded-lg border p-2">
+                <option value="CAP">ÇAP</option><option value="YDP">YDP</option>
+              </select>
+              <input required placeholder="Kabul dönemi" value={studentForm.admissionTerm} onChange={event => setStudentForm({ ...studentForm, admissionTerm: event.target.value })} className="rounded-lg border p-2" />
+              <input required minLength={12} type="password" placeholder="Geçici parola (min. 12)" value={studentForm.temporaryPassword} onChange={event => setStudentForm({ ...studentForm, temporaryPassword: event.target.value })} className="rounded-lg border p-2" />
+              <button disabled={submitting} className="rounded-lg bg-blue-700 px-4 py-2 font-semibold text-white disabled:opacity-60">Öğrenci hesabını aç</button>
+            </form>
+            <form onSubmit={createChairAccount} className="mt-5 flex flex-wrap items-end gap-3 border-t pt-4">
+              <label className="text-sm">Bölüm başkanı e-postası
+                <input required type="email" value={chairForm.email} onChange={event => setChairForm({ ...chairForm, email: event.target.value })} className="mt-1 block rounded-lg border p-2" />
+              </label>
+              <label className="text-sm">Geçici parola
+                <input required minLength={12} type="password" value={chairForm.temporaryPassword} onChange={event => setChairForm({ ...chairForm, temporaryPassword: event.target.value })} className="mt-1 block rounded-lg border p-2" />
+              </label>
+              <button disabled={submitting} className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-semibold">Salt okunur başkan hesabı aç</button>
+            </form>
+            <form onSubmit={addCatalogCourse} className="mt-5 grid gap-3 border-t pt-4 sm:grid-cols-2 lg:grid-cols-5">
+              <h3 className="font-semibold sm:col-span-2 lg:col-span-5">Ders kataloğuna ders ekle</h3>
+              <input required maxLength={20} placeholder="Ders kodu" value={catalogForm.code} onChange={event => setCatalogForm({ ...catalogForm, code: event.target.value })} className="rounded-lg border p-2" />
+              <input required maxLength={100} placeholder="Ders adı" value={catalogForm.name} onChange={event => setCatalogForm({ ...catalogForm, name: event.target.value })} className="rounded-lg border p-2" />
+              <input required type="number" min="1" max="60" placeholder="AKTS" value={catalogForm.ects} onChange={event => setCatalogForm({ ...catalogForm, ects: event.target.value })} className="rounded-lg border p-2" />
+              <input type="number" min="0" max="30" placeholder="Kredi (isteğe bağlı)" value={catalogForm.credits} onChange={event => setCatalogForm({ ...catalogForm, credits: event.target.value })} className="rounded-lg border p-2" />
+              <button disabled={submitting} className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-semibold">Kataloğa ekle</button>
+            </form>
+          </section>
+        )}
 
-            {/* İşlem ve Denetim Modülleri */}
+        <section className="rounded-xl border border-slate-200 bg-white p-5">
+          <div className="flex flex-wrap items-start justify-between gap-4">
             <div>
-              <h3 className="text-xs font-bold text-slate-700 uppercase tracking-wider mb-3">İşlem ve Denetim Yetki Modülleri</h3>
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                <div className="bg-white p-5 rounded-xl border border-slate-200/80 shadow-sm space-y-2">
-                  <span className="text-lg">⚖️</span>
-                  <h4 className="font-bold text-xs text-slate-800">Ders Onayları & Harf Notu Denetimi</h4>
-                  <p className="text-[11px] text-slate-500">Koordinatörün onayladığı ders intibaklarını, harf notlarını ve muafiyet gerekçelerini denetleme.</p>
-                  <button className="text-xs font-semibold text-blue-600 hover:text-blue-800 pt-1">İncele & İzle ➔</button>
-                </div>
-
-                <div className="bg-white p-5 rounded-xl border border-slate-200/80 shadow-sm space-y-2">
-                  <span className="text-lg">📑</span>
-                  <h4 className="font-bold text-xs text-slate-800">Müfredat & Ders Planı Müdahaleleri</h4>
-                  <p className="text-[11px] text-slate-500">Senato kararına aykırı veya eksik AKTS içeren ders protokollerini inceleme ve geri gönderme.</p>
-                  <button className="text-xs font-semibold text-blue-600 hover:text-blue-800 pt-1">İncele & İzle ➔</button>
-                </div>
-
-                <div className="bg-white p-5 rounded-xl border border-slate-200/80 shadow-sm space-y-2">
-                  <span className="text-lg">📂</span>
-                  <h4 className="font-bold text-xs text-slate-800">Evrak, Transkript & Protokol Görüntüleyici</h4>
-                  <p className="text-[11px] text-slate-500">Öğrencilerin teslim ettiği resmi transkript belgelerini ve koordinatörün kilitlediği intibak kütüğünü görüntüleme.</p>
-                  <button className="text-xs font-semibold text-blue-600 hover:text-blue-800 pt-1">İncele & İzle ➔</button>
-                </div>
-
-                <div className="bg-white p-5 rounded-xl border border-slate-200/80 shadow-sm space-y-2">
-                  <span className="text-lg">🔒</span>
-                  <h4 className="font-bold text-xs text-slate-800">Kayıt Düzeltmeleri & Gerekçeli İptaller</h4>
-                  <p className="text-[11px] text-slate-500">Kilitlenmiş protokolleri acil durumlarda açma, revize talebi oluşturma veya yanlış kayıtları iptal etme.</p>
-                  <button className="text-xs font-semibold text-blue-600 hover:text-blue-800 pt-1">İncele & İzle ➔</button>
-                </div>
-
-                <div className="bg-white p-5 rounded-xl border border-slate-200/80 shadow-sm space-y-2">
-                  <span className="text-lg">🎓</span>
-                  <h4 className="font-bold text-xs text-slate-800">Mezuniyet, Sertifika & Kurul Kararları</h4>
-                  <p className="text-[11px] text-slate-500">135 AKTS'yi tamamlayan öğrencilerin mezuniyet intibak onayını Fakülte Yönetim Kuruluna (FYK) sevk etme.</p>
-                  <button className="text-xs font-semibold text-blue-600 hover:text-blue-800 pt-1">İncele & İzle ➔</button>
-                </div>
-
-                <div className="bg-white p-5 rounded-xl border border-slate-200/80 shadow-sm space-y-2">
-                  <span className="text-lg">⚙️</span>
-                  <h4 className="font-bold text-xs text-slate-800">Dinamik Yönerge & Kural Değişiklikleri</h4>
-                  <p className="text-[11px] text-slate-500">2.72 mezuniyet barajı ve 2.50 ilişik kesme tolerans parametrelerini yönetmelik güncellemelerine göre yapılandırma.</p>
-                  <button className="text-xs font-semibold text-blue-600 hover:text-blue-800 pt-1">İncele & İzle ➔</button>
-                </div>
-              </div>
+              <h2 className="font-semibold">Öğrenci ders ve ilerleme kaydı</h2>
+              {selectedStudent && (
+                <p className="mt-1 text-sm text-slate-600">{selectedStudent.fullName} · {selectedStudent.studentNumber} · {selectedStudent.program} · Kabul: {selectedStudent.admissionTerm}</p>
+              )}
             </div>
-
-            {/* SİSTEM DENETİM KÜTÜĞÜ (AUDIT LOG CANLI AKIŞI) */}
-            <div className="bg-white rounded-2xl border border-slate-200/80 shadow-sm overflow-hidden">
-              <div className="p-4 border-b border-slate-100 flex justify-between items-center bg-slate-50/50">
-                <div>
-                  <h3 className="font-bold text-xs text-slate-900 flex items-center gap-2">
-                    <span>🛡️</span> Silinmez Sistem Denetim Kütüğü (Audit Log Canlı Akışı)
-                  </h3>
-                  <p className="text-[11px] text-slate-400 mt-0.5">Sistemde koordinatör ve öğrenciler tarafından yapılan tüm veri ve kilit işlemleri kriptografik zaman damgasıyla kaydedilir.</p>
-                </div>
-                <button onClick={fetchData} className="px-3 py-1 bg-white border rounded text-xs font-semibold hover:bg-slate-50">
-                  ↻ Yenile
-                </button>
-              </div>
-
-              <table className="w-full text-left text-xs border-collapse">
-                <thead>
-                  <tr className="bg-slate-50 text-slate-500 border-b">
-                    <th className="p-3">ID</th>
-                    <th className="p-3">Zaman</th>
-                    <th className="p-3">İşlemi Yapan</th>
-                    <th className="p-3">Eylem Türü</th>
-                    <th className="p-3">Detay ve Gerekçe</th>
-                    <th className="p-3">IP Adresi</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-100 font-mono">
-                  {auditLogs.length > 0 ? (
-                    auditLogs.map((log) => (
-                      <tr key={log.id} className="hover:bg-slate-50/50">
-                        <td className="p-3 font-semibold text-slate-500">#{log.id}</td>
-                        <td className="p-3 text-slate-600">{new Date(log.timestamp).toLocaleTimeString("tr-TR")}</td>
-                        <td className="p-3 font-sans font-bold text-slate-800">{log.performedBy}</td>
-                        <td className="p-3">
-                          <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
-                            log.action === "PROTOCOL_APPROVED" ? "bg-emerald-50 text-emerald-700 border border-emerald-200" :
-                            log.action === "COURSE_ADDED" ? "bg-blue-50 text-blue-700 border border-blue-200" :
-                            log.action === "COURSE_DELETED" ? "bg-red-50 text-red-700 border border-red-200" :
-                            "bg-slate-100 text-slate-700"
-                          }`}>
-                            {log.action}
-                          </span>
-                        </td>
-                        <td className="p-3 font-sans text-slate-700">{log.details}</td>
-                        <td className="p-3 text-slate-400">{log.ipAddress}</td>
-                      </tr>
-                    ))
-                  ) : (
-                    <tr>
-                      <td colSpan={6} className="p-4 text-center font-sans text-slate-400">Henüz denetim kaydı bulunmuyor.</td>
-                    </tr>
-                  )}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        )}
-
-        {/* KOORDİNATÖR PANELİ */}
-        {role === "KOORDINATOR" && student && (
-          <div className="space-y-6">
-            <div className="bg-white p-6 rounded-2xl border border-slate-200/80 shadow-sm flex flex-wrap justify-between items-center gap-4">
-              <div>
-                <span className="text-xs px-2.5 py-0.5 bg-blue-50 text-blue-700 font-semibold rounded-full">Koordinatör Masası</span>
-                <h2 className="text-lg font-bold text-slate-900 mt-1">Ders ve Müfredat Bilgilerini Güncelleme</h2>
-                <p className="text-xs text-slate-500">
-                  Öğrenci: <b className="text-slate-800">{student.fullName}</b> ({student.studentNumber}) • {student.majorDepartment} ➔ {student.doubleMajorDepartment}
-                </p>
-              </div>
-              <button
-                disabled={student.isCapApproved}
-                onClick={handleApprove}
-                className={`px-4 py-2 text-xs font-bold rounded-lg transition shadow-sm ${
-                  student.isCapApproved ? "bg-slate-100 text-slate-400 cursor-not-allowed" : "bg-emerald-600 text-white hover:bg-emerald-700"
-                }`}
-              >
-                {student.isCapApproved ? "✓ Protokol Onaylandı & Kilitlendi" : "Müfredat Değişikliklerini Kaydet ve Onayla"}
-              </button>
-            </div>
-
-            {!student.isLocked && (
-              <form onSubmit={handleAddCourse} className="bg-white p-6 rounded-2xl border border-slate-200/80 shadow-sm space-y-4">
-                <div className="grid grid-cols-1 md:grid-cols-6 gap-3 items-end text-xs">
-                  <div>
-                    <label className="font-semibold text-slate-600 block mb-1">Ders Kodu</label>
-                    <input type="text" placeholder="Örn: 3301351" value={cCode} onChange={e => setCCode(e.target.value)} className="w-full px-3 py-2 border rounded-lg outline-none focus:border-blue-500" />
-                  </div>
-                  <div className="md:col-span-2">
-                    <label className="font-semibold text-slate-600 block mb-1">Ders Adı</label>
-                    <input type="text" placeholder="Örn: NESNEYE YÖNELİK PROGRAMLAMA" value={cName} onChange={e => setCName(e.target.value)} className="w-full px-3 py-2 border rounded-lg outline-none focus:border-blue-500" />
-                  </div>
-                  <div>
-                    <label className="font-semibold text-slate-600 block mb-1">Dönem Seçimi</label>
-                    <select value={cSemester} onChange={e => setCSemester(e.target.value)} className="w-full px-3 py-2 border rounded-lg outline-none focus:border-blue-500 bg-white font-medium">
-                      {DONEMLER.map(d => <option key={d} value={d}>{d}</option>)}
-                    </select>
-                  </div>
-                  <div>
-                    <label className="font-semibold text-slate-600 block mb-1">AKTS</label>
-                    <input type="number" min="1" max="30" value={cAkts} onChange={e => setCAkts(Number(e.target.value))} className="w-full px-3 py-2 border rounded-lg outline-none focus:border-blue-500" />
-                  </div>
-                  <div>
-                    <label className="font-semibold text-slate-600 block mb-1">İntibak Türü</label>
-                    <select value={cStatus} onChange={e => setCStatus(e.target.value as any)} className="w-full px-3 py-2 border rounded-lg outline-none focus:border-blue-500 bg-white">
-                      <option value="Alinacak">Alınacak (Zorunlu)</option>
-                      <option value="Muaf">Muaf (Sayılacak)</option>
-                    </select>
-                  </div>
-                  {cStatus === "Muaf" && (
-                    <div className="md:col-span-6 mt-1">
-                      <label className="font-semibold text-slate-600 block mb-1">Muafiyet Gerekçesi</label>
-                      <input type="text" placeholder="Eşdeğer sayılan anadal dersi" value={cReason} onChange={e => setCReason(e.target.value)} className="w-full px-3 py-2 border rounded-lg outline-none focus:border-blue-500" />
-                    </div>
-                  )}
-                  <div className="md:col-span-6 flex justify-end">
-                    <button type="submit" className="px-6 py-2 bg-blue-600 hover:bg-blue-700 text-white font-semibold text-xs rounded-lg transition shadow-sm">
-                      + Dersi Protokole Ekle
-                    </button>
-                  </div>
-                </div>
-              </form>
+            {!isStudent && (
+              <select aria-label="Öğrenci seç" value={selectedStudentId ?? ""} onChange={async event => {
+                const id = Number(event.target.value);
+                setSelectedStudentId(id);
+                setError("");
+                try { await refreshRecords(id); } catch (loadError) { setError(loadError instanceof Error ? loadError.message : "Dersler yüklenemedi."); }
+              }} className="rounded-lg border p-2">
+                {students.length === 0 && <option value="">Henüz öğrenci yok</option>}
+                {students.map(item => <option key={item.id} value={item.id}>{item.studentNumber} · {item.fullName}</option>)}
+              </select>
             )}
-
-            <div className="bg-white rounded-2xl border border-slate-200/80 shadow-sm overflow-hidden">
-              <table className="w-full text-left text-xs border-collapse">
-                <thead>
-                  <tr className="bg-slate-50/80 text-slate-500 border-b">
-                    <th className="p-3">Dönem</th>
-                    <th className="p-3">Ders Kodu</th>
-                    <th className="p-3">Ders Adı</th>
-                    <th className="p-3">AKTS</th>
-                    <th className="p-3">İntibak Durumu</th>
-                    {!student.isLocked && <th className="p-3 text-right">İşlem</th>}
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-100">
-                  {student.courses.map((course) => (
-                    <tr key={course.id} className="hover:bg-slate-50/50">
-                      <td className="p-3 font-semibold text-slate-500">{course.semesterTaken || "2025-2026 Bahar"}</td>
-                      <td className="p-3 font-mono font-semibold text-slate-800">{course.courseCode}</td>
-                      <td className="p-3 font-medium text-slate-900">{course.courseName}</td>
-                      <td className="p-3">{course.akts}</td>
-                      <td className="p-3">
-                        <span className={`px-2 py-0.5 rounded text-[11px] font-semibold ${course.status === "Muaf" ? "bg-emerald-50 text-emerald-700" : "bg-blue-50 text-blue-700"}`}>
-                          {course.status} {course.exemptionReason ? `(${course.exemptionReason})` : ""}
-                        </span>
-                      </td>
-                      {!student.isLocked && (
-                        <td className="p-3 text-right">
-                          <button onClick={() => handleDeleteCourse(course.id)} className="text-red-600 hover:text-red-800 font-semibold">Kaldır</button>
-                        </td>
-                      )}
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
           </div>
+
+          {selectedStudent && (
+            <>
+              <div className="mt-4 flex flex-wrap gap-3 text-sm">
+                <span className="rounded-lg bg-emerald-50 px-3 py-2 text-emerald-800">Onaylı tamamlanan AKTS: {completedEcts}</span>
+                <span className="rounded-lg bg-amber-50 px-3 py-2 text-amber-800">Onay bekleyen kayıt: {pendingRecords.length}</span>
+              </div>
+
+              {!isChair && (
+                <form onSubmit={addCourseRecord} className="mt-5 grid gap-3 rounded-lg bg-slate-50 p-4 sm:grid-cols-2 lg:grid-cols-4">
+                  <label className="text-sm">Katalog dersi
+                    <select required value={courseForm.courseId} onChange={event => setCourseForm({ ...courseForm, courseId: event.target.value })} className="mt-1 w-full rounded-lg border bg-white p-2">
+                      <option value="">Ders seçin</option>
+                      {catalog.map(item => <option key={item.id} value={item.id}>{item.code} · {item.name} ({item.ects} AKTS)</option>)}
+                    </select>
+                  </label>
+                  <input required pattern="\d{4}-\d{4}" placeholder="Akademik yıl (2025-2026)" value={courseForm.academicYear} onChange={event => setCourseForm({ ...courseForm, academicYear: event.target.value })} className="self-end rounded-lg border p-2" />
+                  <select value={courseForm.term} onChange={event => setCourseForm({ ...courseForm, term: event.target.value })} className="self-end rounded-lg border bg-white p-2">
+                    <option>Güz</option><option>Bahar</option><option>Yaz</option>
+                  </select>
+                  <select value={courseForm.status} onChange={event => setCourseForm({ ...courseForm, status: event.target.value })} className="self-end rounded-lg border bg-white p-2">
+                    <option>Planlandı</option><option>Alındı</option><option>Geçti</option><option>Kaldı</option><option>Muaf</option>
+                  </select>
+                  {(courseForm.status === "Geçti" || courseForm.status === "Kaldı") && <input required maxLength={5} placeholder="Not" value={courseForm.grade} onChange={event => setCourseForm({ ...courseForm, grade: event.target.value })} className="rounded-lg border p-2" />}
+                  <input required type="number" min="1" max="20" placeholder="Deneme no" value={courseForm.attempt} onChange={event => setCourseForm({ ...courseForm, attempt: event.target.value })} className="rounded-lg border p-2" />
+                  {(courseForm.status === "Muaf" || isCoordinator) && <input required={courseForm.status === "Muaf"} maxLength={1000} placeholder={courseForm.status === "Muaf" ? "Muafiyet gerekçesi" : "Değişiklik gerekçesi"} value={courseForm.reason} onChange={event => setCourseForm({ ...courseForm, reason: event.target.value })} className="rounded-lg border p-2" />}
+                  {isCoordinator && <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={courseForm.historicalEntry} onChange={event => setCourseForm({ ...courseForm, historicalEntry: event.target.checked })} />İlk kurulum geçmiş kaydı (hemen onayla)</label>}
+                  <button disabled={submitting || catalog.length === 0} className="rounded-lg bg-blue-700 px-4 py-2 font-semibold text-white disabled:opacity-60">
+                    {isCoordinator ? "Ders kaydını ekle" : "Onaya gönder"}
+                  </button>
+                </form>
+              )}
+
+              <div className="mt-5 overflow-x-auto">
+                <table className="w-full min-w-[760px] text-left text-sm">
+                  <thead className="border-b text-slate-500"><tr>
+                    <th className="p-2">Ders</th><th className="p-2">Dönem</th><th className="p-2">Deneme</th><th className="p-2">Not</th><th className="p-2">Durum</th><th className="p-2">İnceleme</th>{isCoordinator && <th className="p-2">İşlem</th>}
+                  </tr></thead>
+                  <tbody className="divide-y">
+                    {records.map(record => <tr key={record.id}>
+                      <td className="p-2">{record.code} · {record.name}<span className="block text-xs text-slate-500">{record.ects} AKTS{record.isHistoricalEntry ? " · geçmiş kayıt" : ""}</span></td>
+                      <td className="p-2">{record.academicYear} {record.term}</td>
+                      <td className="p-2">{record.attempt}</td><td className="p-2">{record.grade ?? "—"}</td>
+                      <td className="p-2">{record.status}</td><td className="p-2">{record.reviewStatus}{record.reason ? <span className="block text-xs text-slate-500">{record.reason}</span> : null}</td>
+                      {isCoordinator && <td className="space-x-2 p-2">
+                        {record.reviewStatus === "Bekliyor" && <>
+                          <button disabled={submitting} onClick={() => void reviewRecord(record.id, "Onaylandı")} className="text-emerald-700 underline">Onayla</button>
+                          <button disabled={submitting} onClick={() => void reviewRecord(record.id, "Reddedildi")} className="text-red-700 underline">Reddet</button>
+                        </>}
+                      </td>}
+                    </tr>)}
+                    {records.length === 0 && <tr><td colSpan={isCoordinator ? 7 : 6} className="p-5 text-center text-slate-500">Henüz ders kaydı yok.</td></tr>}
+                  </tbody>
+                </table>
+              </div>
+
+              {!isChair && (
+                <section className="mt-6 border-t pt-5">
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <h3 className="font-semibold">Koordinatör–öğrenci yazışması</h3>
+                    <button onClick={() => void refreshMessages(selectedStudent.id)} className="text-sm text-blue-700 underline">Mesajları yenile</button>
+                  </div>
+                  <div className="mt-3 max-h-72 space-y-3 overflow-y-auto">
+                    {messages.map(message => <article key={message.id} className={`rounded-lg p-3 text-sm ${message.isFromCurrentUser ? "ml-8 bg-blue-50" : "mr-8 bg-slate-100"}`}>
+                      <p className="whitespace-pre-wrap">{message.content}</p>
+                      <div className="mt-2 flex items-center justify-between gap-3 text-xs text-slate-500">
+                        <time>{new Date(message.sentAt).toLocaleString("tr-TR")}</time>
+                        <span>{message.isFromCurrentUser ? "Siz gönderdiniz" : "Karşı taraf"} · {isStudent ? (message.readByCoordinator ? "Okundu" : "Okunmadı") : (message.readByStudent ? "Okundu" : "Okunmadı")}</span>
+                        {!message.isFromCurrentUser && <button onClick={() => void markMessageRead(message.id)} className="text-blue-700 underline">Okundu</button>}
+                      </div>
+                    </article>)}
+                    {messages.length === 0 && <p className="text-sm text-slate-500">Henüz mesaj yok.</p>}
+                  </div>
+                  <form onSubmit={sendMessage} className="mt-3 flex gap-2">
+                    <textarea required maxLength={10000} value={messageText} onChange={event => setMessageText(event.target.value)} placeholder="Mesajınızı yazın" className="min-h-20 flex-1 rounded-lg border p-3" />
+                    <button disabled={submitting} className="self-end rounded-lg bg-blue-700 px-4 py-2 text-sm font-semibold text-white">Gönder</button>
+                  </form>
+                  <p className="mt-2 text-xs text-slate-500">Mesajlar kalıcıdır, silinemez. Belge eki bu sürümde devre dışıdır.</p>
+                </section>
+              )}
+
+              {isCoordinator && (
+                <div className="mt-6 grid gap-5 border-t pt-5 lg:grid-cols-2">
+                  <form onSubmit={saveAdvisingData} className="space-y-3 rounded-lg bg-slate-50 p-4">
+                    <h3 className="font-semibold">GANO ve koordinatör özel notu</h3>
+                    <input type="number" min="0" max="4" step="0.01" placeholder="Anadal GANO" value={advisingForm.majorGpa} onChange={event => setAdvisingForm({ ...advisingForm, majorGpa: event.target.value })} className="w-full rounded-lg border p-2" />
+                    <input maxLength={100} placeholder="GANO kaynağı (transkript vb.)" value={advisingForm.gpaSource} onChange={event => setAdvisingForm({ ...advisingForm, gpaSource: event.target.value })} className="w-full rounded-lg border p-2" />
+                    <textarea maxLength={5000} placeholder="Bu not öğrenciye gösterilmez" value={advisingForm.privateNote} onChange={event => setAdvisingForm({ ...advisingForm, privateNote: event.target.value })} className="min-h-20 w-full rounded-lg border p-2" />
+                    <input maxLength={1000} placeholder="Değişiklik gerekçesi" value={advisingForm.reason} onChange={event => setAdvisingForm({ ...advisingForm, reason: event.target.value })} className="w-full rounded-lg border p-2" />
+                    <button disabled={submitting} className="rounded-lg bg-blue-700 px-4 py-2 text-sm font-semibold text-white">Bilgileri kaydet</button>
+                  </form>
+                  <div className="space-y-4 rounded-lg bg-slate-50 p-4">
+                    <form onSubmit={addRuleVersion} className="space-y-3">
+                      <h3 className="font-semibold">Yönerge kural sürümü</h3>
+                      <div className="grid gap-2 sm:grid-cols-2">
+                        <select value={ruleForm.program} onChange={event => setRuleForm({ ...ruleForm, program: event.target.value })} className="rounded-lg border bg-white p-2"><option value="CAP">ÇAP</option><option value="YDP">YDP</option></select>
+                        <select value={ruleForm.metric} onChange={event => setRuleForm({ ...ruleForm, metric: event.target.value })} className="rounded-lg border bg-white p-2"><option value="AnadalGano">Anadal GANO</option><option value="TamamlananAkts">Onaylı tamamlanan AKTS</option></select>
+                        <select value={ruleForm.operator} onChange={event => setRuleForm({ ...ruleForm, operator: event.target.value })} className="rounded-lg border bg-white p-2"><option value="Minimum">En az</option><option value="Maksimum">En fazla</option></select>
+                        <input required type="number" min="0" step="0.01" placeholder="Yönergedeki eşik" value={ruleForm.threshold} onChange={event => setRuleForm({ ...ruleForm, threshold: event.target.value })} className="rounded-lg border p-2" />
+                        <input required placeholder="Yönerge dayanağı / sürüm açıklaması" value={ruleForm.authority} onChange={event => setRuleForm({ ...ruleForm, authority: event.target.value })} className="rounded-lg border p-2 sm:col-span-2" />
+                        <input required type="date" value={ruleForm.effectiveAt} onChange={event => setRuleForm({ ...ruleForm, effectiveAt: event.target.value })} className="rounded-lg border p-2" />
+                        <input required placeholder="Uyarı metni" value={ruleForm.warning} onChange={event => setRuleForm({ ...ruleForm, warning: event.target.value })} className="rounded-lg border p-2" />
+                      </div>
+                      <button disabled={submitting} className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-semibold">Yeni sürüm kaydet</button>
+                    </form>
+                    <div className="border-t pt-3">
+                      <button disabled={submitting} onClick={() => void evaluateRules()} className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-semibold">Yönergeye göre kontrol et</button>
+                      {ruleResult.map((result, index) => <p key={`${result.metric}-${index}`} className="mt-2 text-sm">
+                        {result.metric}: {result.actual ?? "Veri yok"} · eşik {result.operator === "Minimum" ? "≥" : "≤"} {result.threshold} · {result.passed ? "Uygun" : result.warning ?? result.unavailable}
+                      </p>)}
+                    </div>
+                  </div>
+                  <form onSubmit={saveDecision} className="flex flex-wrap items-end gap-3 rounded-lg bg-slate-50 p-4 lg:col-span-2">
+                    <h3 className="w-full font-semibold">Koordinatör kararı</h3>
+                    <select value={decisionForm.decision} onChange={event => setDecisionForm({ ...decisionForm, decision: event.target.value })} className="rounded-lg border bg-white p-2">
+                      <option value="Mezun">Mezun</option><option value="SertifikaVerildi">Sertifika verildi</option><option value="KayitIptal">Kayıt iptali</option><option value="Aktif">Aktif</option>
+                    </select>
+                    <input required maxLength={1000} placeholder="Karar gerekçesi" value={decisionForm.reason} onChange={event => setDecisionForm({ ...decisionForm, reason: event.target.value })} className="min-w-64 flex-1 rounded-lg border p-2" />
+                    <button disabled={submitting} className="rounded-lg bg-blue-700 px-4 py-2 text-sm font-semibold text-white">Kararı kaydet</button>
+                  </form>
+                </div>
+              )}
+            </>
+          )}
+        </section>
+
+        {isChair && (
+          <section className="rounded-xl border border-slate-200 bg-white p-5">
+            <h2 className="font-semibold">İşlem geçmişi · salt okunur</h2>
+            <div className="mt-3 space-y-2">
+              {audit.map(item => <article key={item.id} className="border-b py-2 text-sm">
+                <strong>{item.action}</strong> · {item.recordType} #{item.recordId} · {new Date(item.timestamp).toLocaleString("tr-TR")}
+                {item.reason && <p className="text-slate-600">Gerekçe: {item.reason}</p>}
+              </article>)}
+              {audit.length === 0 && <p className="text-sm text-slate-500">Henüz işlem kaydı yok.</p>}
+            </div>
+          </section>
         )}
 
-        {/* ÖĞRENCİ PANELİ */}
-        {role === "OGRENCI" && (
-          <div className="space-y-6">
-            <div className="bg-white p-6 rounded-2xl border border-slate-200/80 shadow-sm flex flex-wrap justify-between items-center gap-4">
-              <div>
-                <span className="px-2.5 py-0.5 bg-blue-50 text-blue-700 text-xs font-semibold rounded-full">Aktif Dönem: {seciliDonem}</span>
-                <h2 className="text-xl font-bold text-slate-900 mt-2">Dönemlik Ders ve Not Durumu</h2>
-                <p className="text-xs text-slate-500 mt-1">Öğrenci: Merve Öztürk (2133011045)</p>
-              </div>
-              <div className="flex items-center gap-2">
-                <span className="text-xs font-medium text-slate-500">Dönem:</span>
-                <select value={seciliDonem} onChange={e => setSeciliDonem(e.target.value)} className="px-3 py-1.5 text-xs border rounded-lg bg-slate-50 font-bold text-blue-900 outline-none">
-                  {DONEMLER.map(d => <option key={d} value={d}>{d}</option>)}
-                </select>
-              </div>
-            </div>
-
-            <div className="bg-white rounded-2xl border border-slate-200/80 shadow-sm overflow-hidden">
-              <table className="w-full text-left text-xs border-collapse">
-                <thead>
-                  <tr className="bg-slate-50 text-slate-500 border-b">
-                    <th className="p-3">Ders Kodu & Adı</th>
-                    <th className="p-3">AKTS</th>
-                    <th className="p-3">Harf Notu</th>
-                    <th className="p-3">Durum</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-100">
-                  {filtrelenmisDersler.map((item) => (
-                    <tr key={item.id} className="hover:bg-slate-50/50">
-                      <td className="p-3 font-medium text-slate-800">{item.courseCode} {item.courseName}</td>
-                      <td className="p-3">{item.akts}</td>
-                      <td className="p-3 font-bold">{item.grade || "Devam"}</td>
-                      <td className="p-3">
-                        <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-50 text-emerald-700">
-                          {item.status === "Muaf" ? "MUAF" : "KAYITLI"}
-                        </span>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        )}
-      </main>
-
-      {/* ALT FOOTER */}
-      <footer className="bg-white border-t border-slate-200 py-3 mt-8">
-        <div className="max-w-7xl mx-auto px-6 flex flex-wrap justify-between items-center text-[11px] text-slate-400 gap-2">
-          <p>© 2026 Üniversite Bilgi Yönetim Sistemi (ABYS) • Bölüm Başkanlığı, ÇAP/YDP Koordinatörlük ve Denetim Modülü</p>
-          <div className="flex gap-4">
-            <span className="hover:text-slate-600 cursor-pointer">Sürüm v3.4.1 (Kurumsal)</span>
-            <span className="hover:text-slate-600 cursor-pointer">Mevzuat Kılavuzu</span>
-            <span className="hover:text-slate-600 cursor-pointer">BT Destek</span>
-          </div>
-        </div>
-      </footer>
-    </div>
+        <p className="text-xs text-slate-500">Bu sürümde öğrenci ve ders kayıtları kalıcıdır. Belge yükleme, mesajlaşma, sürümlü yönerge kuralları ve mezuniyet karar akışları henüz tamamlanmadı; güvenlik testi yapılmış gibi gösterilmez.</p>
+      </div>
+    </main>
   );
 }
