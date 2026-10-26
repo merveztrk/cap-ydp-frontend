@@ -3,8 +3,9 @@
 :root {
   --background: #f4f7fb;
   --foreground: #17243a;
-  --brand: #155eef;
-  --brand-dark: #123b82;
+  --brand: #1b376a;
+  --brand-dark: #0a192f;
+  --brand-gold: #d3aa49;
   --muted: #63748b;
   --border: #e2e8f0;
 }
@@ -71,9 +72,9 @@ textarea::placeholder {
   display: flex;
   min-height: 100vh;
   flex-direction: column;
-  align-items: center;
+  align-items: stretch;
   justify-content: space-between;
-  padding: 24px clamp(20px, 5vw, 72px);
+  padding: 0;
   background:
     radial-gradient(ellipse at 50% 47%, rgb(222 234 255 / 62%), transparent 42%),
     #f5f8fc;
@@ -82,10 +83,29 @@ textarea::placeholder {
 .login-header,
 .login-footer {
   display: flex;
-  width: min(100%, 1240px);
   align-items: center;
   justify-content: space-between;
   gap: 16px;
+}
+
+.login-header {
+  width: 100%;
+  min-height: 78px;
+  padding: 12px clamp(20px, 4vw, 60px);
+  background: var(--brand);
+  color: #fff;
+}
+
+.login-footer {
+  width: 100%;
+  padding: 17px clamp(20px, 4vw, 60px);
+  background: var(--brand-dark);
+  color: #c4cede;
+}
+
+.login-card {
+  align-self: center;
+  margin-block: 36px;
 }
 
 .portal-brand {
@@ -120,14 +140,29 @@ textarea::placeholder {
 
 .brand-mark {
   display: grid;
-  width: 40px;
-  height: 40px;
+  width: 44px;
+  height: 44px;
   flex: 0 0 auto;
   place-items: center;
-  border-radius: 12px;
-  background: #102c55;
-  color: white;
-  box-shadow: 0 5px 14px rgb(16 44 85 / 18%);
+  border: 1px solid rgb(211 170 73 / 75%);
+  border-radius: 50%;
+  background: rgb(255 255 255 / 5%);
+  color: var(--brand-gold);
+}
+
+.login-header .portal-brand,
+.portal-header .portal-brand {
+  color: #fff;
+}
+
+.login-header .portal-brand small,
+.portal-header .portal-brand small {
+  color: #c4cede;
+}
+
+.portal-brand strong {
+  font-size: 13px;
+  letter-spacing: 0.035em;
 }
 
 .secure-label {
@@ -282,7 +317,6 @@ textarea:focus {
 }
 
 .login-footer {
-  color: #7b8ba1;
   font-size: 10px;
 }
 
@@ -295,30 +329,37 @@ textarea:focus {
   position: sticky;
   z-index: 10;
   top: 0;
-  border-bottom: 1px solid #e5ebf3;
-  background: rgb(255 255 255 / 96%);
-  backdrop-filter: blur(12px);
+  border-bottom: 3px solid var(--brand-gold);
+  background: var(--brand);
 }
 
-.portal-header-main,
-.portal-nav,
-.portal-content {
-  width: min(100% - 40px, 1210px);
+.portal-header-main {
+  width: min(100% - 48px, 1480px);
   margin-inline: auto;
 }
 
 .portal-header-main {
   display: flex;
-  min-height: 68px;
+  min-height: 80px;
   align-items: center;
   justify-content: space-between;
   gap: 20px;
+}
+
+.portal-content {
+  width: min(100% - 40px, 1100px);
+  margin-inline: auto;
+}
+
+.portal-header .portal-home-button {
+  flex: 0 0 auto;
 }
 
 .account-menu {
   display: flex;
   align-items: center;
   gap: 10px;
+  margin-left: auto;
 }
 
 .account-avatar {
@@ -326,10 +367,10 @@ textarea:focus {
   width: 36px;
   height: 36px;
   place-items: center;
-  border: 1px solid #d9e6fb;
+  border: 1px solid rgb(211 170 73 / 55%);
   border-radius: 50%;
-  background: #edf4ff;
-  color: #174ea6;
+  background: rgb(255 255 255 / 10%);
+  color: #f2d47f;
   font-size: 13px;
   font-weight: 750;
 }
@@ -342,14 +383,14 @@ textarea:focus {
 
 .account-details strong {
   overflow: hidden;
-  color: #263b58;
+  color: #fff;
   font-size: 11px;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .account-details small {
-  color: #7b8ba1;
+  color: #c4cede;
   font-size: 10px;
 }
 
@@ -358,26 +399,28 @@ textarea:focus {
   align-items: center;
   gap: 7px;
   margin-left: 8px;
-  border: 1px solid #dce4ef;
+  border: 1px solid rgb(255 255 255 / 35%);
   border-radius: 9px;
-  background: #fff;
+  background: transparent;
   padding: 8px 11px;
-  color: #52657e;
+  color: #fff;
   font-size: 11px;
   font-weight: 650;
 }
 
 .sign-out-button:hover {
-  border-color: #b9c8dc;
-  background: #f8fafc;
-  color: #1f3553;
+  border-color: var(--brand-gold);
+  background: rgb(255 255 255 / 8%);
+  color: #fff;
 }
 
 .portal-nav {
   display: flex;
-  min-height: 46px;
+  min-width: 0;
+  min-height: 52px;
   align-items: stretch;
-  gap: 8px;
+  justify-content: center;
+  gap: 2px;
   overflow-x: auto;
   scrollbar-width: thin;
 }
@@ -386,23 +429,23 @@ textarea:focus {
   display: inline-flex;
   flex: 0 0 auto;
   align-items: center;
-  gap: 8px;
+  gap: 7px;
   border-bottom: 2px solid transparent;
-  padding: 0 13px;
+  padding: 0 9px;
   background: transparent;
-  color: #61728a;
-  font-size: 11px;
+  color: #d3dbea;
+  font-size: 10px;
   font-weight: 650;
 }
 
 .portal-nav button:hover,
 .portal-nav button[aria-current="page"] {
-  border-bottom-color: var(--brand);
-  color: #174ea6;
+  border-bottom-color: var(--brand-gold);
+  color: #fff;
 }
 
 .portal-nav button[aria-current="page"] {
-  background: #f1f6ff;
+  background: rgb(255 255 255 / 7%);
 }
 
 .portal-content {
@@ -644,23 +687,132 @@ textarea:focus {
 }
 
 .portal-footer {
+  display: grid;
+  justify-items: center;
+  gap: 14px;
+  margin-top: 20px;
+  padding: 28px 20px 24px;
+  background: var(--brand-dark);
+  color: #c4cede;
+  font-size: 11px;
+}
+
+.portal-footer-brand {
+  display: grid;
+  justify-items: center;
+  gap: 7px;
+  color: #fff;
+  letter-spacing: 0.05em;
+}
+
+.footer-emblem {
+  display: grid;
+  width: 42px;
+  height: 42px;
+  place-items: center;
+  border: 1px solid rgb(211 170 73 / 70%);
+  border-radius: 50%;
+  color: var(--brand-gold);
+}
+
+.portal-footer-details {
   display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 8px 24px;
+  color: #aebbd0;
+  text-align: center;
+}
+
+.audit-description {
+  margin-top: 7px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.audit-entry {
+  border: 1px solid #e7ebf1;
+  border-radius: 11px;
+  background: #fff;
+  padding: 13px 15px;
+}
+
+.audit-entry-heading {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
   justify-content: space-between;
-  gap: 12px;
-  padding: 5px 2px;
-  color: #8492a6;
-  font-size: 10px;
+  gap: 8px 14px;
+}
+
+.audit-entry-heading time {
+  color: #6b778a;
+  font-size: 11px;
+}
+
+.audit-action-badge {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  padding: 5px 10px;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.audit-action-blue {
+  background: #e8f0fc;
+  color: #244f8f;
+}
+
+.audit-action-gray {
+  background: #eef0f3;
+  color: #566273;
+}
+
+.audit-action-green {
+  background: #e8f5ec;
+  color: #267345;
+}
+
+.audit-action-purple {
+  background: #f0ebfb;
+  color: #6545a0;
+}
+
+.audit-entry-record {
+  margin-top: 8px;
+  color: #33445c;
+  font-size: 12px;
+}
+
+.audit-entry-record span {
+  color: #78869a;
+}
+
+.audit-entry-reason {
+  margin-top: 5px;
+  color: #617087;
+  font-size: 12px;
 }
 
 @media (max-width: 760px) {
   .portal-header-main,
-  .portal-nav,
   .portal-content {
     width: min(100% - 28px, 1210px);
   }
 
   .portal-header-main {
-    min-height: 62px;
+    min-height: 70px;
+    flex-wrap: wrap;
+    gap: 0 12px;
+    padding-top: 8px;
+  }
+
+  .portal-nav {
+    order: 3;
+    flex: 1 1 100%;
+    justify-content: flex-start;
+    min-height: 42px;
   }
 
   .account-details {
@@ -681,11 +833,20 @@ textarea:focus {
   }
 }
 
-@media (max-width: 480px) {
-  .login-page {
-    padding: 18px;
+@media (max-width: 1100px) and (min-width: 761px) {
+  .portal-header-main {
+    flex-wrap: wrap;
+    padding-top: 8px;
   }
 
+  .portal-nav {
+    order: 3;
+    flex: 1 1 100%;
+    min-height: 42px;
+  }
+}
+
+@media (max-width: 480px) {
   .login-card {
     padding: 28px 22px 24px;
   }
@@ -694,6 +855,10 @@ textarea:focus {
     flex-direction: column;
     align-items: flex-start;
     font-size: 9px;
+  }
+
+  .login-header {
+    min-height: 70px;
   }
 
   .secure-label {
@@ -714,8 +879,12 @@ textarea:focus {
     display: none;
   }
 
+  .portal-header-main {
+    width: min(100% - 24px, 1210px);
+  }
+
   .portal-nav button {
-    padding-inline: 10px;
+    padding-inline: 9px;
     font-size: 10px;
   }
 
@@ -739,8 +908,9 @@ textarea:focus {
     padding: 15px;
   }
 
-  .portal-footer {
+  .portal-footer-details {
     flex-direction: column;
+    gap: 7px;
   }
 }
 

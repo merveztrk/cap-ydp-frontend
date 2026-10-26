@@ -77,6 +77,26 @@ interface AuditEntry {
   timestamp: string;
 }
 
+const AUDIT_ACTION_LABELS: Record<string, { label: string; tone: string }> = {
+  MESSAGE_SENT: { label: "Mesaj gönderildi", tone: "blue" },
+  MESSAGE_READ: { label: "Mesaj okundu", tone: "gray" },
+  READ_ONLY_ACCOUNT_CREATED: { label: "Yetkili hesabı oluşturuldu", tone: "green" },
+  STUDENT_CREATED: { label: "Öğrenci kaydı eklendi", tone: "green" },
+  COORDINATOR_INITIALIZED: { label: "Sistem kurulumu tamamlandı", tone: "purple" },
+  "Ders kaydı onaylandı": { label: "Ders kaydı onaylandı", tone: "green" },
+  "Öğrenci kaydı oluşturuldu": { label: "Öğrenci kaydı eklendi", tone: "green" },
+};
+
+const AUDIT_RECORD_TYPE_LABELS: Record<string, string> = {
+  Account: "Hesap",
+  Course: "Ders",
+  CourseRecord: "Ders kaydı",
+  Document: "Belge",
+  Message: "Mesaj",
+  Rule: "Yönerge kuralı",
+  Student: "Öğrenci",
+};
+
 interface Message {
   id: number;
   senderUserId: number;
@@ -931,8 +951,8 @@ export default function AcademicPortal() {
           <div className="portal-brand">
             <span className="brand-mark"><Landmark aria-hidden="true" size={20} /></span>
             <span>
-              <strong>Akademik Portal</strong>
-              <small>ÇAP · YDP Koordinasyon Sistemi</small>
+              <strong>SELÇUK ÜNİVERSİTESİ</strong>
+              <small>ÇAP · YDP Akademik Portalı</small>
             </span>
           </div>
           <span className="secure-label"><ShieldCheck aria-hidden="true" size={15} /> Güvenli erişim</span>
@@ -1019,10 +1039,31 @@ export default function AcademicPortal() {
           <button type="button" className="portal-brand portal-home-button" onClick={() => setActiveView("overview")} aria-current={activeView === "overview" ? "page" : undefined}>
             <span className="brand-mark"><Landmark aria-hidden="true" size={20} /></span>
             <span>
-              <strong>Akademik Portal</strong>
-              <small>ÇAP · YDP Koordinasyon Sistemi</small>
+              <strong>SELÇUK ÜNİVERSİTESİ</strong>
+              <small>ÇAP · YDP Akademik Portalı</small>
             </span>
           </button>
+          <nav className="portal-nav" aria-label="Ana gezinme">
+            {isCoordinator && <>
+              <button type="button" onClick={() => setActiveView("overview")} aria-current={activeView === "overview" ? "page" : undefined}><Landmark aria-hidden="true" size={16} /> Ana menü</button>
+              <button type="button" onClick={() => setActiveView("students")} aria-current={activeView === "students" ? "page" : undefined}><UsersRound aria-hidden="true" size={16} /> Öğrenci yönetimi</button>
+              <button type="button" onClick={() => setActiveView("courses")} aria-current={activeView === "courses" ? "page" : undefined}><BookOpen aria-hidden="true" size={16} /> Ders ve onaylar</button>
+              <button type="button" onClick={() => setActiveView("documents")} aria-current={activeView === "documents" ? "page" : undefined}><FileText aria-hidden="true" size={16} /> Belge inceleme</button>
+              <button type="button" onClick={() => setActiveView("messages")} aria-current={activeView === "messages" ? "page" : undefined}><MessageSquareText aria-hidden="true" size={16} /> Mesajlar</button>
+              <button type="button" onClick={() => setActiveView("rules")} aria-current={activeView === "rules" ? "page" : undefined}><ShieldCheck aria-hidden="true" size={16} /> Yönerge ve kararlar</button>
+              <button type="button" onClick={() => setActiveView("audit")} aria-current={activeView === "audit" ? "page" : undefined}><Clock3 aria-hidden="true" size={16} /> İşlem geçmişi</button>
+            </>}
+            {isStudent && <>
+              <button type="button" onClick={() => setActiveView("courses")} aria-current={activeView === "courses" ? "page" : undefined}><BookOpen aria-hidden="true" size={16} /> Ders ve not durumu</button>
+              <button type="button" onClick={() => setActiveView("documents")} aria-current={activeView === "documents" ? "page" : undefined}><FileText aria-hidden="true" size={16} /> Belge ve transkript</button>
+              <button type="button" onClick={() => setActiveView("messages")} aria-current={activeView === "messages" ? "page" : undefined}><MessageSquareText aria-hidden="true" size={16} /> Koordinatör mesajları</button>
+            </>}
+            {isChair && <>
+              <button type="button" onClick={() => setActiveView("students")} aria-current={activeView === "students" ? "page" : undefined}><UsersRound aria-hidden="true" size={16} /> Öğrenci özeti</button>
+              <button type="button" onClick={() => setActiveView("documents")} aria-current={activeView === "documents" ? "page" : undefined}><FileText aria-hidden="true" size={16} /> Öğrenci belgeleri</button>
+              <button type="button" onClick={() => setActiveView("audit")} aria-current={activeView === "audit" ? "page" : undefined}><ShieldCheck aria-hidden="true" size={16} /> Denetim kayıtları</button>
+            </>}
+          </nav>
           <div className="account-menu">
             <span className="account-avatar">{isCoordinator ? "K" : isChair ? "B" : "Ö"}</span>
             <span className="account-details">
@@ -1034,27 +1075,6 @@ export default function AcademicPortal() {
             </button>
           </div>
         </div>
-        <nav className="portal-nav" aria-label="Ana gezinme">
-          {isCoordinator && <>
-            <button type="button" onClick={() => setActiveView("overview")} aria-current={activeView === "overview" ? "page" : undefined}><Landmark aria-hidden="true" size={16} /> Ana menü</button>
-            <button type="button" onClick={() => setActiveView("students")} aria-current={activeView === "students" ? "page" : undefined}><UsersRound aria-hidden="true" size={16} /> Öğrenci yönetimi</button>
-            <button type="button" onClick={() => setActiveView("courses")} aria-current={activeView === "courses" ? "page" : undefined}><BookOpen aria-hidden="true" size={16} /> Ders ve onaylar</button>
-            <button type="button" onClick={() => setActiveView("documents")} aria-current={activeView === "documents" ? "page" : undefined}><FileText aria-hidden="true" size={16} /> Belge inceleme</button>
-            <button type="button" onClick={() => setActiveView("messages")} aria-current={activeView === "messages" ? "page" : undefined}><MessageSquareText aria-hidden="true" size={16} /> Mesajlar</button>
-            <button type="button" onClick={() => setActiveView("rules")} aria-current={activeView === "rules" ? "page" : undefined}><ShieldCheck aria-hidden="true" size={16} /> Yönerge ve kararlar</button>
-            <button type="button" onClick={() => setActiveView("audit")} aria-current={activeView === "audit" ? "page" : undefined}><Clock3 aria-hidden="true" size={16} /> İşlem geçmişi</button>
-          </>}
-          {isStudent && <>
-            <button type="button" onClick={() => setActiveView("courses")} aria-current={activeView === "courses" ? "page" : undefined}><BookOpen aria-hidden="true" size={16} /> Ders ve not durumu</button>
-            <button type="button" onClick={() => setActiveView("documents")} aria-current={activeView === "documents" ? "page" : undefined}><FileText aria-hidden="true" size={16} /> Belge ve transkript</button>
-            <button type="button" onClick={() => setActiveView("messages")} aria-current={activeView === "messages" ? "page" : undefined}><MessageSquareText aria-hidden="true" size={16} /> Koordinatör mesajları</button>
-          </>}
-          {isChair && <>
-            <button type="button" onClick={() => setActiveView("students")} aria-current={activeView === "students" ? "page" : undefined}><UsersRound aria-hidden="true" size={16} /> Öğrenci özeti</button>
-            <button type="button" onClick={() => setActiveView("documents")} aria-current={activeView === "documents" ? "page" : undefined}><FileText aria-hidden="true" size={16} /> Öğrenci belgeleri</button>
-            <button type="button" onClick={() => setActiveView("audit")} aria-current={activeView === "audit" ? "page" : undefined}><ShieldCheck aria-hidden="true" size={16} /> Denetim kayıtları</button>
-          </>}
-        </nav>
       </header>
 
       <div className="portal-content">
@@ -1551,22 +1571,37 @@ export default function AcademicPortal() {
 
         {(isCoordinator || isChair) && activeView === "audit" && (
           <section id="audit" className="workspace-card">
-            <h2 className="section-title"><ShieldCheck aria-hidden="true" size={19} /> İşlem geçmişi · salt okunur</h2>
+            <h2 className="section-title"><ShieldCheck aria-hidden="true" size={19} /> {isChair ? "Bölüm başkanlığı işlem geçmişi" : "İşlem geçmişi"} · salt okunur</h2>
+            {isChair && <p className="audit-description">Akademik işlemlerin görüntülenebilir kayıtları.</p>}
             <div className="mt-3 space-y-2">
-              {audit.map(item => <article key={item.id} className="border-b py-2 text-sm">
-                <strong>{item.action}</strong> · {item.recordType} #{item.recordId} · {new Date(item.timestamp).toLocaleString("tr-TR")}
-                {item.reason && <p className="text-slate-600">Gerekçe: {item.reason}</p>}
-              </article>)}
+              {audit.map(item => {
+                const action = AUDIT_ACTION_LABELS[item.action] ?? { label: item.action, tone: "gray" };
+                const recordType = AUDIT_RECORD_TYPE_LABELS[item.recordType] ?? item.recordType;
+                return <article key={item.id} className="audit-entry">
+                  <div className="audit-entry-heading">
+                    <span className={`audit-action-badge audit-action-${action.tone}`}>{action.label}</span>
+                    <time dateTime={item.timestamp}>{new Date(item.timestamp).toLocaleString("tr-TR")}</time>
+                  </div>
+                  <p className="audit-entry-record">{recordType} <span>#{item.recordId}</span></p>
+                  {item.reason && <p className="audit-entry-reason">Gerekçe: {item.reason}</p>}
+                </article>;
+              })}
               {audit.length === 0 && <p className="text-sm text-slate-500">Henüz işlem kaydı yok.</p>}
             </div>
           </section>
         )}
 
-        <footer className="portal-footer">
+      </div>
+      <footer className="portal-footer">
+        <div className="portal-footer-brand">
+          <span className="footer-emblem"><Landmark aria-hidden="true" size={20} /></span>
+          <strong>SELÇUK ÜNİVERSİTESİ</strong>
+        </div>
+        <div className="portal-footer-details">
           <span>ÇAP · YDP Akademik Takip Sistemi</span>
           <span>Belge yükleme bu sürümde kullanılamıyor.</span>
-        </footer>
-      </div>
+        </div>
+      </footer>
     </main>
   );
 }
